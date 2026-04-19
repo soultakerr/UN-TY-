@@ -1,0 +1,153 @@
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.SceneManagement;
+using UnityEngine.UIElements;
+
+public class PlayerController : MonoBehaviour
+{
+    // SCORE
+    private float elapsedTime = 0f;
+    private float score = 0f;
+    public float scoreMultiplier = 10f;
+
+    // MOVEMENT
+    public float thrustForce = 5f;
+    public GameObject boosterFlame;
+    private Rigidbody2D rb;
+
+    // HEALTH
+    public int maxHealth = 3;
+    private int currentHealth;
+
+    // UI
+    public UIDocument uiDocument;
+    
+    private Button restartButton;
+
+    // EFFECT
+    public GameObject explosionEffect;
+
+    // SHOOT
+    public GameObject bulletPrefab;
+    public Transform firePoint;
+    public float fireRate = 0.2f;
+    private float nextFireTime;
+
+    // HEART UI
+    public GameObject[] hearts;
+
+    void Start()
+    {
+        rb = GetComponent<Rigidbody2D>();
+        currentHealth = maxHealth;
+
+        // UI güvenli çekme
+        if (uiDocument != null)
+        {
+            var root = uiDocument.rootVisualElement;
+
+           
+            restartButton = root.Q<Button>("RestartButton");
+
+            if (restartButton != null)
+            {
+                restartButton.style.display = DisplayStyle.None;
+                restartButton.clicked += ReloadScene;
+            }
+        }
+
+        UpdateHearts();
+    }
+
+    void Update()
+    {
+        // SCORE
+        elapsedTime += Time.deltaTime;
+        score = Mathf.FloorToInt(elapsedTime * scoreMultiplier);
+
+      
+        // HAREKET
+        if (Mouse.current != null && Mouse.current.leftButton.isPressed)
+        {
+            Vector3 mousePos = Camera.main.ScreenToWorldPoint(Mouse.current.position.value);
+            Vector2 direction = (mousePos - transform.position).normalized;
+
+            transform.up = direction;
+            rb.AddForce(direction * thrustForce);
+        }
+
+        if (Mouse.current != null)
+        {
+            if (Mouse.current.leftButton.wasPressedThisFrame)
+                boosterFlame.SetActive(true);
+            else if (Mouse.current.leftButton.wasReleasedThisFrame)
+                boosterFlame.SetActive(false);
+        }
+
+        // ATEŞ
+        if (Mouse.current != null && Mouse.current.rightButton.isPressed && Time.time >= nextFireTime)
+        {
+            Shoot();
+            nextFireTime = Time.time + fireRate;
+        }
+    }
+
+    // HASAR
+    void OnCollisionEnter2D(Collision2D collision)
+    {
+        if (collision.gameObject.CompareTag("Enemy"))
+        {
+            TakeDamage(1);
+        }
+    }
+
+    void OnTriggerEnter2D(Collider2D other)
+    {
+        if (other.CompareTag("EnemyBullet"))
+        {
+            Destroy(other.gameObject);
+            TakeDamage(1);
+        }
+    }
+
+    void TakeDamage(int damage)
+    {
+        currentHealth -= damage;
+        currentHealth = Mathf.Clamp(currentHealth, 0, maxHealth);
+
+        UpdateHearts();
+
+        if (currentHealth <= 0)
+        {
+            Die();
+        }
+    }
+
+    void UpdateHearts()
+    {
+        for (int i = 0; i < hearts.Length; i++)
+        {
+            hearts[i].SetActive(i < currentHealth);
+        }
+    }
+
+    void Die()
+    {
+        Instantiate(explosionEffect, transform.position, transform.rotation);
+
+        if (restartButton != null)
+            restartButton.style.display = DisplayStyle.Flex;
+
+        Destroy(gameObject);
+    }
+
+    void Shoot()
+    {
+        Instantiate(bulletPrefab, firePoint.position, firePoint.rotation);
+    }
+
+    void ReloadScene()
+    {
+        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+    }
+}
