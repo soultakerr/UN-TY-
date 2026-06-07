@@ -11,42 +11,100 @@ public class PlayerController : MonoBehaviour
     public float scoreMultiplier = 10f;
 
     // MOVEMENT
+    [Header("Movement")]
     public float thrustForce = 5f;
-    public GameObject boosterFlame;
+    public float maxVelocity = 12f;
+    public float rotationSpeed = 4f;
     private Rigidbody2D rb;
 
     // HEALTH
+    [Header("Health")]
     public int maxHealth = 3;
     private int currentHealth;
 
+    // FUEL
+    [Header("Fuel")]
+    public float maxFuel = 100f;
+    public float fuelConsumptionRate = 10f;
+    public float fuelSlowMultiplier = 0.2f;
+    private float currentFuel;
+    private FuelStation nearbyStation = null;
+
     // UI
+    [Header("UI")]
     public UIDocument uiDocument;
-    
     private Button restartButton;
+    public GameObject[] hearts;
 
     // EFFECT
+    [Header("Effects")]
     public GameObject explosionEffect;
 
     // SHOOT
+    [Header("Shoot")]
     public GameObject bulletPrefab;
     public Transform firePoint;
     public float fireRate = 0.2f;
     private float nextFireTime;
 
-    // HEART UI
-    public GameObject[] hearts;
+    public AudioClip shootSound;
+    private AudioSource shootAudioSource;
+
+    // AFTERBURNER
+    [Header("Afterburner")]
+    public ParticleSystem afterburnerPS;
+    public float afterburnerMaxEmission = 80f;
+    public float afterburnerFadeSpeed = 8f;
+
+    private ParticleSystem.EmissionModule psEmission;
+    private float currentEmissionRate = 0f;
+
+    // AUDIO
+    [Header("Audio")]
+    public AudioClip engineSound;
+    public AudioClip hitSound;
+    public float engineMaxVolume = 1f;
+    public float engineFadeSpeed = 6f;
+
+    private AudioSource engineAudioSource;
+    private AudioSource hitAudioSource;
+
+    // REPAIR
+    [Header("Repair")]
+    public Key repairKey = Key.E;
+    public float repairCooldown = 10f;
+    public int repairAmount = 1;
+    public float repairCastTime = 2f;
+
+    public GameObject repairEffectPrefab;
+    public AudioClip repairSound;
+    public GameObject repairReadyIcon;
+
+    private float repairTimer = 0f;
+    private float repairCastTimer = 0f;
+    private bool isRepairing = false;
+    private AudioSource repairAudioSource;
+
+    // DEATH CAMERA
+    [Header("Death Camera")]
+    public Camera deathCamera;
+
+    public int GetHealth() => currentHealth;
+    public float GetFuel() => currentFuel;
+    public float GetMaxFuel() => maxFuel;
 
     void Start()
     {
         rb = GetComponent<Rigidbody2D>();
         currentHealth = maxHealth;
+        currentFuel = maxFuel;
 
-        // UI güvenli çekme
+        if (deathCamera != null)
+            deathCamera.enabled = false;
+
         if (uiDocument != null)
         {
             var root = uiDocument.rootVisualElement;
-
-           
             restartButton = root.Q<Button>("RestartButton");
 
             if (restartButton != null)
@@ -56,49 +114,189 @@ public class PlayerController : MonoBehaviour
             }
         }
 
+        if (afterburnerPS != null)
+        {
+            psEmission = afterburnerPS.emission;
+            psEmission.rateOverTime = 0f;
+            afterburnerPS.Play();
+        }
+
+        engineAudioSource = gameObject.AddComponent<AudioSource>();
+        engineAudioSource.clip = engineSound;
+        engineAudioSource.loop = true;
+        engineAudioSource.volume = 0f;
+        if (engineSound != null) engineAudioSource.Play();
+
+        hitAudioSource = gameObject.AddComponent<AudioSource>();
+        shootAudioSource = gameObject.AddComponent<AudioSource>();
+        repairAudioSource = gameObject.AddComponent<AudioSource>();
+
+        UpdateRepairIcon(true);
         UpdateHearts();
     }
 
     void Update()
     {
-        // SCORE
         elapsedTime += Time.deltaTime;
-        score = Mathf.FloorToInt(elapsedTime * scoreMultiplier);
+        score = Mathf.Floor(elapsedTime * scoreMultiplier);
 
-      
-        // HAREKET
-        if (Mouse.current != null && Mouse.current.leftButton.isPressed)
+        HandleMovement();
+        HandleShoot();
+        HandleRepair();
+        UpdateEffects();
+    }
+
+    void HandleMovement()
+    {
+        bool thrusting = Mouse.current != null && Mouse.current.leftButton.isPressed;
+
+        if (!thrusting) return;
+
+        Vector3 mousePos = Camera.main.ScreenToWorldPoint(Mouse.current.position.value);
+        mousePos.z = 0f;
+
+        Vector2 direction = (mousePos - transform.position).normalized;
+
+        float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg - 90f;
+        Quaternion targetRotation = Quaternion.Euler(0, 0, angle);
+
+        transform.rotation = Quaternion.RotateTowards(
+            transform.rotation,
+            targetRotation,
+            rotationSpeed * 200f * Time.deltaTime
+        );
+
+        bool hasFuel = currentFuel > 0f;
+        float multiplier = hasFuel ? 1f : fuelSlowMultiplier;
+
+        rb.AddForce(transform.up * thrustForce * multiplier);
+
+        if (hasFuel)
         {
-            Vector3 mousePos = Camera.main.ScreenToWorldPoint(Mouse.current.position.value);
-            Vector2 direction = (mousePos - transform.position).normalized;
-
-            transform.up = direction;
-            rb.AddForce(direction * thrustForce);
+            currentFuel -= fuelConsumptionRate * Time.deltaTime;
+            currentFuel = Mathf.Clamp(currentFuel, 0f, maxFuel);
         }
 
-        if (Mouse.current != null)
+        if (rb.linearVelocity.magnitude > maxVelocity * multiplier)
         {
-            if (Mouse.current.leftButton.wasPressedThisFrame)
-                boosterFlame.SetActive(true);
-            else if (Mouse.current.leftButton.wasReleasedThisFrame)
-                boosterFlame.SetActive(false);
+            rb.linearVelocity = rb.linearVelocity.normalized * maxVelocity * multiplier;
         }
+    }
 
-        // ATEŞ
-        if (Mouse.current != null && Mouse.current.rightButton.isPressed && Time.time >= nextFireTime)
+    void HandleShoot()
+    {
+        if (Mouse.current != null &&
+            Mouse.current.rightButton.isPressed &&
+            Time.time >= nextFireTime)
         {
             Shoot();
             nextFireTime = Time.time + fireRate;
         }
     }
 
-    // HASAR
+    void HandleRepair()
+    {
+        if (repairTimer > 0f)
+        {
+            repairTimer -= Time.deltaTime;
+
+            if (repairTimer <= 0f)
+            {
+                repairTimer = 0f;
+                UpdateRepairIcon(true);
+            }
+        }
+
+        bool repairHeld = Keyboard.current != null &&
+                          Keyboard.current[repairKey].isPressed;
+
+        bool canRepair = repairTimer <= 0f && currentHealth < maxHealth;
+
+        if (canRepair && repairHeld)
+        {
+            if (!isRepairing)
+            {
+                isRepairing = true;
+                repairCastTimer = 0f;
+            }
+
+            repairCastTimer += Time.deltaTime;
+
+            if (repairCastTimer >= repairCastTime)
+                FinishRepair();
+        }
+        else if (isRepairing)
+        {
+            isRepairing = false;
+            repairCastTimer = 0f;
+        }
+    }
+
+    void UpdateEffects()
+    {
+        bool thrusting = Mouse.current != null && Mouse.current.leftButton.isPressed;
+        bool hasFuel = currentFuel > 0f;
+
+        float targetRate = (thrusting && hasFuel) ? afterburnerMaxEmission : 0f;
+        float targetVolume = (thrusting && hasFuel) ? engineMaxVolume : 0f;
+
+        currentEmissionRate = Mathf.Lerp(
+            currentEmissionRate,
+            targetRate,
+            Time.deltaTime * afterburnerFadeSpeed
+        );
+
+        if (afterburnerPS != null)
+            psEmission.rateOverTime = currentEmissionRate;
+
+        if (engineAudioSource != null)
+        {
+            engineAudioSource.volume = Mathf.Lerp(
+                engineAudioSource.volume,
+                targetVolume,
+                Time.deltaTime * engineFadeSpeed
+            );
+        }
+    }
+
+    public void SetNearbyStation(FuelStation station)
+    {
+        nearbyStation = station;
+    }
+
+    public void BuyFuel(float amount)
+    {
+        currentFuel = Mathf.Clamp(currentFuel + amount, 0f, maxFuel);
+    }
+
+    void FinishRepair()
+    {
+        isRepairing = false;
+        repairCastTimer = 0f;
+
+        currentHealth = Mathf.Min(currentHealth + repairAmount, maxHealth);
+        UpdateHearts();
+
+        if (repairAudioSource != null && repairSound != null)
+            repairAudioSource.PlayOneShot(repairSound);
+
+        if (repairEffectPrefab != null)
+            Instantiate(repairEffectPrefab, transform.position, Quaternion.identity);
+
+        repairTimer = repairCooldown;
+        UpdateRepairIcon(false);
+    }
+
+    void UpdateRepairIcon(bool visible)
+    {
+        if (repairReadyIcon != null)
+            repairReadyIcon.SetActive(visible);
+    }
+
     void OnCollisionEnter2D(Collision2D collision)
     {
         if (collision.gameObject.CompareTag("Enemy"))
-        {
             TakeDamage(1);
-        }
     }
 
     void OnTriggerEnter2D(Collider2D other)
@@ -110,40 +308,51 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    void TakeDamage(int damage)
+    public void TakeDamage(int damage)
     {
         currentHealth -= damage;
         currentHealth = Mathf.Clamp(currentHealth, 0, maxHealth);
 
         UpdateHearts();
 
+        if (hitAudioSource != null && hitSound != null)
+            hitAudioSource.PlayOneShot(hitSound);
+
         if (currentHealth <= 0)
-        {
             Die();
-        }
     }
 
     void UpdateHearts()
     {
         for (int i = 0; i < hearts.Length; i++)
-        {
             hearts[i].SetActive(i < currentHealth);
-        }
     }
 
     void Die()
     {
-        Instantiate(explosionEffect, transform.position, transform.rotation);
+        if (engineAudioSource != null)
+            engineAudioSource.Stop();
 
-        if (restartButton != null)
-            restartButton.style.display = DisplayStyle.Flex;
+        if (explosionEffect != null)
+            Instantiate(explosionEffect, transform.position, transform.rotation);
+
+        if (deathCamera != null)
+            deathCamera.enabled = true;
+
+        if (GameManager.Instance != null)
+            GameManager.Instance.ShowGameOver();
 
         Destroy(gameObject);
     }
 
     void Shoot()
     {
+        if (firePoint == null || bulletPrefab == null) return;
+
         Instantiate(bulletPrefab, firePoint.position, firePoint.rotation);
+
+        if (shootAudioSource != null && shootSound != null)
+            shootAudioSource.PlayOneShot(shootSound);
     }
 
     void ReloadScene()
