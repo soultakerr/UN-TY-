@@ -1,0 +1,95 @@
+using UnityEngine;
+using TMPro;
+
+public class FuelStation : MonoBehaviour
+{
+    [Header("Yakıt")]
+    public float fuelPerPurchase = 30f;
+    public int maxPurchases = 3;
+    private int remainingPurchases;
+
+    [Header("Menzil")]
+    public float interactRange = 2f;
+
+    [Header("UI")]
+    public GameObject stationUI;
+    public TextMeshProUGUI remainingText;
+
+    [Header("Audio")]
+    public AudioClip refuelSound;
+    private AudioSource audioSource;
+
+    private PlayerController player;
+    private bool playerNearby = false;
+
+    void Start()
+    {
+        remainingPurchases = maxPurchases;
+        audioSource = gameObject.AddComponent<AudioSource>();
+
+        if (stationUI != null)
+            stationUI.SetActive(false);
+
+        // Player'ı otomatik bul
+        player = FindObjectOfType<PlayerController>();
+
+        UpdateUI();
+    }
+
+    void Update()
+    {
+        if (player == null) return;
+
+        float dist = Vector2.Distance(transform.position, player.transform.position);
+        bool inRange = dist <= interactRange;
+
+        // Yakın/uzak geçişi
+        if (inRange && !playerNearby)
+        {
+            playerNearby = true;
+            if (stationUI != null)
+                stationUI.SetActive(true);
+            UpdateUI();
+        }
+        else if (!inRange && playerNearby)
+        {
+            playerNearby = false;
+            if (stationUI != null)
+                stationUI.SetActive(false);
+        }
+
+        // R tuşu
+        if (playerNearby && Input.GetKeyDown(KeyCode.R))
+            TryRefuel();
+    }
+
+    void TryRefuel()
+    {
+        if (remainingPurchases <= 0)
+        {
+            Debug.Log("İstasyon boş!");
+            return;
+        }
+
+        player.BuyFuel(fuelPerPurchase);
+        remainingPurchases--;
+
+        if (refuelSound != null)
+            audioSource.PlayOneShot(refuelSound);
+
+        UpdateUI();
+        Debug.Log($"Yakıt dolduruldu! Kalan: {remainingPurchases}/{maxPurchases}");
+    }
+
+    void UpdateUI()
+    {
+        if (remainingText != null)
+            remainingText.text = $"[R] Yakıt Doldur\nKalan: {remainingPurchases}/{maxPurchases}";
+    }
+
+    void OnDrawGizmosSelected()
+    {
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, interactRange);
+    }
+}
