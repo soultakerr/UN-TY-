@@ -1,0 +1,39 @@
+using UnityEngine;
+using System;
+
+public class PlayerEconomy : MonoBehaviour
+{
+    public static PlayerEconomy Instance;
+
+    public int coins = 0;
+
+    public Action onCoinsChanged; // coin değişince haber verir
+
+    void Awake()
+    {
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+        Instance = this;
+    }
+
+    public void AddCoins(int amount)
+    {
+        coins += amount;
+        onCoinsChanged?.Invoke();
+        Debug.Log("Coins: " + coins);
+    }
+
+    public bool SpendCoins(int amount)
+    {
+        if (coins >= amount)
+        {
+            coins -= amount;
+            onCoinsChanged?.Invoke();
+            return true;
+        }
+        return false;
+    }
+}
