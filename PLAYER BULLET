@@ -1,0 +1,73 @@
+using UnityEngine;
+
+public class Bullet : MonoBehaviour
+{
+    public float speed = 10f;
+    public float lifeTime = 3f;
+    public int damage = 1;
+
+    void Start()
+    {
+        Destroy(gameObject, lifeTime);
+    }
+
+    void Update()
+    {
+        transform.Translate(Vector2.up * speed * Time.deltaTime);
+    }
+
+    private void OnTriggerEnter2D(Collider2D other)
+    {
+        Debug.Log("Tank'a çarpan: " + other.tag); // EKLE
+         if (other.CompareTag("Bullet"))
+        // GOLEM ENEMY
+        if (other.CompareTag("Enemy"))
+        {
+            GolomEnemy golom = other.GetComponent<GolomEnemy>();
+            if (golom != null)
+                golom.TakeDamage(damage);
+
+            // GolomEnemy kendi içinde de destroy ediyor ama
+            // burada da çağırıyoruz garantiye almak için
+            TurretAI turretAI = other.GetComponent<TurretAI>();
+            if (turretAI != null)
+                turretAI.TakeHit();
+
+            Destroy(gameObject);
+        }
+
+        // TURRET
+        else if (other.CompareTag("Turret"))
+        {
+            TurretHealth turret = other.GetComponent<TurretHealth>();
+            if (turret != null)
+                turret.TakeDamage(damage);
+
+            TurretAI turretAI = other.GetComponent<TurretAI>();
+            if (turretAI != null)
+                turretAI.TakeHit();
+
+            Destroy(gameObject);
+        }
+
+        // SPAWNER
+        else if (other.CompareTag("Spawner"))
+        {
+            Spawner spawner = other.GetComponent<Spawner>();
+            if (spawner != null)
+                spawner.TakeDamage(damage);
+
+            Destroy(gameObject);
+        }
+
+        // BASE
+        else if (other.CompareTag("Base"))
+        {
+            BaseManager baseManager = other.GetComponent<BaseManager>();
+            if (baseManager != null)
+                baseManager.TakeDamage(damage);
+
+            Destroy(gameObject);
+        }
+    }
+}
